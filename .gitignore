@@ -221,3 +221,6 @@ __marimo__/
 
 */**/wandb
 
+# Local S3 cache (populated by EDA notebooks on first run, not committed)
+data/cache/
+
