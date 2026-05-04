@@ -30,3 +30,21 @@ Tract-level housing tenure, household size, age structure, employment and educat
 Third-party reprocessing of Source 2 with English column names. Single CSV covering all 36,333 tracts. The working version used in the pipeline.
 
 **[INEATLAS_DOCUMENTATION.md](INEATLAS_DOCUMENTATION.md)**
+
+## Generated data
+
+Parquet files produced from the three sources — inventory, S3 upload map, full INE t-code mapping, and customer join guide.
+
+**[GENERATED_DATA.md](GENERATED_DATA.md)**
+
+## Joining with customer data
+
+How to link a HomeServe customer record to census tract features via address geocoding and spatial join. Includes fallback options (postal code → municipio), GeoPandas implementation sketch, and GDPR note.
+
+**[CUSTOMER_DATA_JOIN.md](CUSTOMER_DATA_JOIN.md)**
+
+## EDA findings
+
+Regional heatmap analysis, Basque Country NaN root cause, and cross-validation against INE Census 2021 Nota de Prensa.
+
+**[EDA_REGIONAL_FINDINGS.md](EDA_REGIONAL_FINDINGS.md)**
