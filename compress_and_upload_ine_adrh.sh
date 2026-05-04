@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-SRC_DIR="$HOME/.openclaw/workspace/downloads/ine_5650"
+SRC_DIR="$(dirname "$0")/data/input/ine_adrh"
 S3_DEST="s3://hsf-group-ai-spain-hvac/ine-adrh/raw"
 AWS_PROFILE="AWSAdministratorAccess-268271485741"
 ZSTD_LEVEL=15

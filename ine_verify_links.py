@@ -11,7 +11,7 @@ import json
 import urllib.request
 from pathlib import Path
 
-DOWNLOADS_DIR   = Path.home() / ".openclaw/workspace/downloads/ine_5650"
+DOWNLOADS_DIR   = Path(__file__).parent / "data/input/ine_adrh"
 TABLES_FILE     = DOWNLOADS_DIR / "tables_with_links.json"
 CHUNK_SIZE      = 1 * 1024 * 1024  # 1 MB
 TIMEOUT         = 30

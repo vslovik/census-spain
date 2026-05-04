@@ -507,7 +507,7 @@ Four scripts handle the full workflow. Run in order:
 | `ine_verify_links.py` | Downloads the first 1 MB of each JSON API URL and confirms it returns valid JSON. No full download. | No |
 | `ine_download.py` | Streams each JSON file from its API URL to disk. Skips already-downloaded files unless `--all` is passed. | No |
 
-All scripts use the `playwright` package (already in `pyproject.toml`) with a persistent Chromium profile at `~/.openclaw/browser/openclaw/user-data`.
+All scripts use the `playwright` package (already in `pyproject.toml`) with a persistent Chromium profile at `data/browser_profile/`.
 
 ### Alternative access methods (fallback if direct links break)
 
@@ -606,7 +606,7 @@ requests.get("https://www.ine.es/OpenAPI/tablas/30824/data", params={"page": 1})
 ```bash
 # 1. Discover all download URLs (browser required)
 poetry run python ine_find_links.py
-# → writes ~/.openclaw/workspace/downloads/ine_5650/tables_with_links.json
+# → writes data/input/ine_adrh/tables_with_links.json
 
 # 2. Verify all JSON API links are alive (~10 MB total, no full download)
 poetry run python ine_verify_links.py
@@ -620,14 +620,14 @@ poetry run python ine_download.py --all     # force re-download all
 for id in 30824 30825 30826 30827 30828 30829 30830 30831 30832 37677; do
   wget -q --show-progress \
     "https://www.ine.es/jaxiT3/files/t/es/csv_bdsc/${id}.csv" \
-    -O ~/.openclaw/workspace/downloads/ine_5650/${id}.csv
+    -O data/input/ine_adrh/${id}.csv
 done
 ```
 
 ### Monitor download progress
 
 ```bash
-watch -n 5 'ls -lh ~/.openclaw/workspace/downloads/ine_5650/'
+watch -n 5 'ls -lh data/input/ine_adrh/'
 ```
 
 ### Encoding note

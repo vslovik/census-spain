@@ -7,7 +7,7 @@ from pathlib import Path
 
 with sync_playwright() as p:
     br = p.chromium.launch_persistent_context(
-        str(Path.home() / '.openclaw/browser/openclaw/user-data'), headless=True)
+        str(Path(__file__).parent / 'data/browser_profile'), headless=True)
     page = br.new_page()
     page.goto('https://www.ine.es/jaxiT3/dlgExport.htm?t=30829&L=0',
               wait_until='networkidle', timeout=60000)

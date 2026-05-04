@@ -13,10 +13,10 @@ import json
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
-DOWNLOADS_DIR = Path.home() / ".openclaw/workspace/downloads/ine_5650"
+DOWNLOADS_DIR = Path(__file__).parent / "data/input/ine_adrh"
 TABLES_FILE   = DOWNLOADS_DIR / "tables.json"
 OUTPUT_FILE   = DOWNLOADS_DIR / "tables_with_links.json"
-USER_DATA_DIR = Path.home() / ".openclaw/browser/openclaw/user-data"
+USER_DATA_DIR = Path(__file__).parent / "data/browser_profile"
 
 tables = json.loads(TABLES_FILE.read_text())
 results = []
