@@ -72,7 +72,28 @@ The **sección censal** is the primary join key for HVAC propensity modelling (`
 
 ## File formats: CSV vs JSON
 
-Both formats contain data at **all three geographic levels** (municipio, distrito, sección) at **identical geographic granularity** — the same secciones appear in both. JSON is not a subset or superset in terms of coverage. The difference is metadata richness per row.
+Both formats contain data at **all three geographic levels** (municipio, distrito, sección). Their coverage and structure differ in two verified ways (table 37677, May 2026):
+
+**1. Sección coverage — nearly but not fully identical**
+
+| | CSV | JSON |
+|-|-----|------|
+| Unique secciones | 37,072 | 37,071 |
+| In common | 37,071 | 37,071 |
+| Format-only | 1 (`1103205003`, Cádiz) | 0 |
+
+One sección (`1103205003`) appears in the CSV but not the JSON. Zero JSON-only secciones. For 2023 extraction this is negligible, but processing from JSON alone will miss this one Cádiz sección.
+
+**2. Grid completeness — CSV is full, JSON is sparse**
+
+CSV contains a **complete grid**: every sección × year × indicator combination is present as a row, even when INE published no data for that cell. JSON **omits observations where no data was published** — a sección with coverage only from 2019 onward will have 5 entries in JSON but 9 rows in CSV.
+
+For table 37677 at sección level:
+- CSV: 667,296 rows (= 37,072 × 2 indicators × 9 years — exact full grid)
+- JSON: 643,520 data points (23,776 fewer — missing grid entries omitted)
+- 54 observations classified as values in CSV but `null` in JSON (negligible reclassification)
+
+**3. Metadata richness — JSON is richer per observation**
 
 | Field | CSV | JSON |
 |-------|-----|------|
@@ -85,14 +106,8 @@ Both formats contain data at **all three geographic levels** (municipio, distrit
 | Data quality flag | ✗ | ✓ `T3_TipoDato` (`"Definitivo"` = confirmed final value) |
 | Periodicity flag | ✗ | ✓ `T3_Periodo` (`"A"` = annual) |
 | Suppressed values | `.` string | `null` |
-| Empty geo/year rows | included | omitted (~180k rows for table 30826) |
 
-**Row count comparison (table 30826 example):**
-- CSV: 4,513,968 rows = 3,356,547 values + 977,319 suppressed (`.`) + 180,102 empty
-- JSON: 4,333,866 data points = 3,356,304 values + 977,562 nulls (no empty rows)
-- The ~180k "empty" CSV rows represent geo/year combinations where INE never produced data; JSON omits these cleanly.
-
-**For all new sección-level extractions, prefer the JSON**: `cod_seccion` comes clean from `MetaData[].Codigo`, units are explicit, and `COD` enables incremental annual updates without re-downloading the full table.
+**For all new sección-level extractions, prefer the JSON**: `cod_seccion` comes clean from `MetaData[].Codigo`, units are explicit, `COD` enables incremental annual updates, and the sparse structure means fewer NaN rows to handle. The one CSV-only sección (`1103205003`) can be accepted as a known gap.
 
 The existing parquets for tables 30824, 30825, 30826 were built from CSV and are missing `COD`, `T3_Unidad`, and `T3_TipoDato` columns.
 

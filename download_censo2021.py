@@ -5,12 +5,11 @@ Indicator file for secciones censales — single file, all Spain.
 Source: https://www.ine.es/dyngs/INEbase/operacion.htm?c=Estadistica_C&cid=1254736177108&menu=resultados
 Direct: https://www.ine.es/censos2021/C2021_Indicadores.csv
 
-Keeps only the indicators relevant for HVAC and solar propensity models:
-  - Ownership rate (% viviendas en propiedad)
-  - Building age distribution
-  - Building type (apartment vs house)
-  - Household size
-  - Population structure
+Column codes verified against:
+  data/input/ine_census_2021/indicadores_seccen_c2021.xlsx
+
+NOTE: The raw CSV uses comma as separator (not semicolon) and has NO CUSEC column.
+Geographic key (cod_seccion) is constructed from cpro + cmun + dist + secc.
 """
 
 import requests
@@ -18,7 +17,8 @@ import pandas as pd
 from pathlib import Path
 import sys
 
-OUTPUT_DIR = Path(".")
+OUTPUT_DIR = Path("data/generated/ineatlas")
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 HEADERS = {
     "User-Agent": (
@@ -51,172 +51,132 @@ def download(url: str, dest: Path) -> Path:
     return dest
 
 
-# ── Load & inspect ────────────────────────────────────────────────────────────
+# ── Load ──────────────────────────────────────────────────────────────────────
 def load_censo(path: Path) -> pd.DataFrame:
-    # The file uses semicolon separator and has a header row + data
-    df = pd.read_csv(path, sep=";", encoding="utf-8-sig", dtype=str)
+    # Comma-delimited (NOT semicolon); encoding utf-8-sig strips BOM
+    df = pd.read_csv(path, sep=",", encoding="utf-8-sig", dtype=str)
     df.columns = [c.strip() for c in df.columns]
     print(f"\nLoaded: {df.shape[0]:,} rows × {df.shape[1]} columns")
-    print(f"First columns: {list(df.columns[:8])}")
-    print(f"\nAll column names:")
-    for i, c in enumerate(df.columns):
-        print(f"  [{i:03d}] {c}")
+    print(f"Columns: {list(df.columns)}")
     return df
 
 
-# ── Select relevant indicators ────────────────────────────────────────────────
-# These are the known column name patterns in C2021_Indicadores.csv
-# Exact names confirmed from INE documentation
-
+# ── Indicator mapping (verified against indicadores_seccen_c2021.xlsx) ────────
+# All t-codes map to proportions (0–1) except t1_1 (absolute count) and
+# t18_1 / t19_1 / t19_2 / t20_1–t20_3 / t21_1 / t22_1–t22_5 (absolute counts).
 INDICATOR_MAP = {
-    # Geography
-    "CUSEC":            "cod_seccion",       # 10-digit section code (key join field)
-    "NMUN":             "municipio",
-    "NPRO":             "provincia",
-    "NCA":              "ccaa",
-
     # Population
-    "t1_1":             "poblacion_total",
-    "t1_2":             "poblacion_hombres",
-    "t1_3":             "poblacion_mujeres",
+    "t1_1":  "poblacion_total",
 
-    # Age structure
-    "t2_1":             "pct_menores_16",
-    "t2_2":             "pct_16_64",
-    "t2_3":             "pct_65_mas",
-    "t2_4":             "edad_media",
+    # Sex
+    "t2_1":  "pct_mujeres",
+    "t2_2":  "pct_hombres",
 
-    # Household
-    "t6_1":             "n_hogares",
-    "t6_2":             "tamano_medio_hogar",
-    "t6_3":             "pct_hogares_unipersonales",
+    # Age
+    "t3_1":  "edad_media",
+    "t4_1":  "pct_menores_16",
+    "t4_2":  "pct_16_64",
+    "t4_3":  "pct_mayores_64",
 
-    # Housing tenure — KEY for both solar and HVAC
-    "t8_1":             "n_viviendas_principales",
-    "t8_2":             "pct_vivienda_propiedad",       # % owned (not renting)
-    "t8_3":             "pct_vivienda_alquiler",        # % renting
-    "t8_4":             "pct_vivienda_otra_forma",      # % other tenure
+    # Nationality / origin
+    "t5_1":  "pct_extranjeros",
+    "t6_1":  "pct_nacidos_extranjero",
 
-    # Building type — KEY for solar (houses > flats) and HVAC sizing
-    "t9_1":             "pct_edificio_unifamiliar",     # detached/semi-detached
-    "t9_2":             "pct_edificio_bloque",          # apartment block
+    # Education (in progress / stock)
+    "t7_1":  "pct_cursando_estudios_superiores",   # enrolled in HE (escur 08-12)
+    "t8_1":  "pct_cursando_universidad",            # enrolled in university (escur 09-12)
+    "t9_1":  "pct_estudios_superiores_completados", # completed HE
 
-    # Building age — KEY for replacement demand (old = no system or outdated)
-    "t10_1":            "pct_antes_1900",
-    "t10_2":            "pct_1900_1940",
-    "t10_3":            "pct_1941_1960",
-    "t10_4":            "pct_1961_1970",
-    "t10_5":            "pct_1971_1980",
-    "t10_6":            "pct_1981_1990",
-    "t10_7":            "pct_1991_2000",
-    "t10_8":            "pct_2001_2010",
-    "t10_9":            "pct_despues_2010",
+    # Labour market
+    "t10_1": "tasa_paro",       # % parados / activos
+    "t11_1": "tasa_empleo",     # % ocupados / pob 16+
+    "t12_1": "tasa_actividad",  # % activos / pob 16+
 
-    # Housing surface — proxy for ticket size
-    "t11_1":            "pct_menos_30m2",
-    "t11_2":            "pct_30_45m2",
-    "t11_3":            "pct_45_60m2",
-    "t11_4":            "pct_60_75m2",
-    "t11_5":            "pct_75_90m2",
-    "t11_6":            "pct_90_105m2",
-    "t11_7":            "pct_105_120m2",
-    "t11_8":            "pct_mas_120m2",
+    # Economic inactivity types
+    "t13_1": "pct_pension_invalidez",   # disability pension / pob 16+
+    "t14_1": "pct_pension_jubilacion",  # retirement pension / pob 16+ — KEY HVAC signal
+    "t15_1": "pct_otra_inactividad",    # other inactivity / pob 16+ (NOT heating system)
+    "t16_1": "pct_estudiantes",         # students / pob 16+ (NOT air conditioning)
 
-    # Education (proxy for income stability)
-    "t4_1":             "pct_sin_estudios",
-    "t4_2":             "pct_estudios_primarios",
-    "t4_3":             "pct_estudios_secundarios",
-    "t4_4":             "pct_estudios_superiores",
+    # Marital status
+    "t17_1": "pct_soltero",
+    "t17_2": "pct_casado",
+    "t17_3": "pct_viudo",
+    "t17_4": "pct_estado_civil_desconocido",
+    "t17_5": "pct_separado_divorciado",
 
-    # Employment
-    "t5_1":             "pct_ocupados",
-    "t5_2":             "pct_parados",
-    "t5_3":             "pct_inactivos",
+    # Dwellings (absolute counts)
+    "t18_1": "total_viviendas",
+    "t19_1": "viviendas_principales",
+    "t19_2": "viviendas_no_principales",  # vacancy / second homes signal
 
-    # Nationality (affects income attribution in ADRH)
-    "t3_1":             "pct_espanoles",
-    "t3_2":             "pct_extranjeros",
+    # Housing tenure (absolute counts)
+    "t20_1": "viviendas_en_propiedad",    # KEY for HVAC — owner-occupied
+    "t20_2": "viviendas_en_alquiler",
+    "t20_3": "viviendas_otro_regimen",
+
+    # Households (absolute counts)
+    "t21_1": "total_hogares",
+    "t22_1": "hogares_1_persona",
+    "t22_2": "hogares_2_personas",
+    "t22_3": "hogares_3_personas",
+    "t22_4": "hogares_4_personas",
+    "t22_5": "hogares_5_mas_personas",
 }
 
 
 def select_and_rename(df: pd.DataFrame) -> pd.DataFrame:
-    # Find which expected columns actually exist
-    available  = {k: v for k, v in INDICATOR_MAP.items() if k in df.columns}
-    missing    = [k for k in INDICATOR_MAP if k not in df.columns]
-
+    available = {k: v for k, v in INDICATOR_MAP.items() if k in df.columns}
+    missing   = [k for k in INDICATOR_MAP if k not in df.columns]
     if missing:
-        print(f"\nWarning: {len(missing)} expected columns not found (may have different names):")
-        print(f"  {missing}")
-        print("\nSearching for similar columns...")
-        # Try to find close matches
-        for m in missing[:5]:
-            close = [c for c in df.columns if m.lower() in c.lower() or c.lower().startswith(m[:3].lower())]
-            if close:
-                print(f"  '{m}' → possible matches: {close[:3]}")
+        print(f"\nWarning: {len(missing)} expected columns not found: {missing}")
 
-    selected = df[list(available.keys())].copy()
+    # Construct cod_seccion from geographic components (no CUSEC in raw file)
+    geo_cols = ["ccaa", "cpro", "cmun", "dist", "secc"]
+    for col in geo_cols:
+        if col not in df.columns:
+            raise ValueError(f"Missing geographic column: {col}")
+
+    selected = df[geo_cols + list(available.keys())].copy()
     selected.rename(columns=available, inplace=True)
 
-    # Convert numeric columns
-    for col in selected.columns:
-        if col not in ["cod_seccion", "municipio", "provincia", "ccaa"]:
-            selected[col] = (
-                selected[col]
-                .str.replace(",", ".", regex=False)
-                .str.replace(" ", "", regex=False)
-                .pipe(pd.to_numeric, errors="coerce")
-            )
+    selected["cod_seccion"] = (
+        selected["cpro"].str.zfill(2)
+        + selected["cmun"].str.zfill(3)
+        + selected["dist"].str.zfill(2)
+        + selected["secc"].str.zfill(3)
+    )
 
-    # Derived features useful for the model
-    if "pct_1941_1960" in selected.columns and "pct_1961_1970" in selected.columns:
-        selected["pct_edificios_pre1980"] = (
-            selected[["pct_antes_1900","pct_1900_1940","pct_1941_1960",
-                       "pct_1961_1970","pct_1971_1980"]]
-            .sum(axis=1, skipna=True)
+    # Convert numeric columns
+    numeric_cols = [v for v in available.values()]
+    for col in numeric_cols:
+        selected[col] = (
+            selected[col]
+            .str.replace(",", ".", regex=False)
+            .str.replace(" ", "", regex=False)
+            .pipe(pd.to_numeric, errors="coerce")
         )
 
-    return selected
+    col_order = ["cod_seccion", "ccaa", "cpro", "cmun", "dist", "secc"] + list(available.values())
+    return selected[col_order]
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # 1. Download
-    raw = download(
-        "https://www.ine.es/censos2021/C2021_Indicadores.csv",
-        OUTPUT_DIR / "censo2021_indicadores_raw.csv",
-    )
+    raw_path = Path("data/input/ine_census_2021/C2021_Indicadores.csv")
 
-    # 2. Load and inspect all columns
-    df = load_censo(raw)
+    if not raw_path.exists():
+        raw_path = download(
+            "https://www.ine.es/censos2021/C2021_Indicadores.csv",
+            raw_path,
+        )
 
-    # 3. Select relevant indicators
+    df = load_censo(raw_path)
     selected = select_and_rename(df)
     print(f"\nSelected shape: {selected.shape}")
     print(f"Columns: {list(selected.columns)}")
     print(selected.head(3).to_string())
 
-    # 4. Save
-    selected.to_parquet(OUTPUT_DIR / "censo2021_secciones.parquet", index=False)
-    selected.to_csv(OUTPUT_DIR / "censo2021_secciones.csv", index=False)
-    print(f"\nSaved: censo2021_secciones.parquet  ({selected.memory_usage(deep=True).sum()/1e6:.1f} MB)")
-    print(f"Saved: censo2021_secciones.csv")
-
-    # 5. Merge with ADRH 2023 if available
-    adrh_path = OUTPUT_DIR / "adrh_secciones_2023.parquet"
-    if adrh_path.exists():
-        print("\nMerging with ADRH 2023...")
-        adrh  = pd.read_parquet(adrh_path)
-        # Align keys: ADRH cod_seccion is already 10-digit string
-        merged = adrh.merge(
-            selected.rename(columns={"cod_seccion": "cod_seccion"}),
-            on="cod_seccion",
-            how="left",
-            suffixes=("_adrh", "_censo"),
-        )
-        merged.to_parquet(OUTPUT_DIR / "features_secciones_2023.parquet", index=False)
-        merged.to_csv(OUTPUT_DIR / "features_secciones_2023.csv", index=False)
-        print(f"Merged shape: {merged.shape}")
-        print(f"Saved: features_secciones_2023.parquet  ← use this as model input")
-    else:
-        print("\nNote: run adrh_secciones.py first to generate adrh_secciones_2023.parquet")
-        print("Then re-run this script for the auto-merge.")
+    out = OUTPUT_DIR / "censo2021_secciones_from_ine.parquet"
+    selected.to_parquet(out, index=False)
+    print(f"\nSaved: {out}  ({out.stat().st_size/1e6:.1f} MB)")

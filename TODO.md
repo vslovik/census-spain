@@ -1,72 +1,49 @@
 # TODO — ADRH / eda_adrh.ipynb
 
-## Immediate next step (start here)
-
-### 1. Verify CSV vs JSON geographic granularity claim
-`INE_ADRH_DATA_DOCUMENTATION.md` currently states CSV and JSON have "identical geographic
-granularity". This has NOT been verified empirically.
-
-**Task:** Add a notebook cell that:
-- Reads `37677.csv.zst` from S3 (102 MB raw — smallest CSV, already cached JSON)
-- Extracts sección-level rows and collects the set of unique `cod_seccion` values
-- Reads `37677.json.zst` from cache, extracts sección `Codigo` values
-- Compares the two sets: count, overlap, CSV-only, JSON-only
-- Also checks the 243 value/suppressed discrepancy (values in CSV that are null in JSON)
-
-Then update the documentation to reflect what is actually observed, not assumed.
+## Current priority: other pending items (see below)
 
 ---
 
-## After verification — process missing tables
-
-The current `adrh_secciones_2023_wide.parquet` is incomplete.
-The HVAC feature extraction plan (bottom of `INE_ADRH_DATA_DOCUMENTATION.md`) requires:
-**30824 ✓, 37677 ✗, 30832 ✗, 30825 ✓, 30829 ✗**
-
-Three tables need sección-level parquets built from JSON (not CSV):
-
-| Table | Content | Why JSON |
-|-------|---------|----------|
-| **37677** | Gini index + P80/P20 ratio | Clean `cod_seccion` from `MetaData[].Codigo`, no regex |
-| **30832** | Demographics: mean age, % over 65, % single-person HH, household size | Mixed units (`T3_Unidad`) — essential to parse correctly |
-| **30829** | % population below relative thresholds (40/50/60/80/120% of median) | Mixed sex/total breakdown — filter to Total rows via MetaData |
-
-For each table, the processing cell should:
-1. Call `read_adrh_json_raw(table_id)`
-2. Filter to sección-level entries using `MetaData[].T3_Variable == "Secciones"`
-3. Extract `cod_seccion` from `MetaData[].Codigo`
-4. Extract indicator name from the relevant `MetaData` dimension
-5. Extract `T3_Unidad`, `COD`, year (`Anyo`), value (`Valor`) from `Data`
-6. Flatten to long format, filter to 2023, pivot to wide
-7. Save as parquet in `data/generated/adrh/` with `COD` and `T3_Unidad` columns preserved
-
-Then rebuild `adrh_secciones_2023_wide.parquet` to include all 5 tables.
-
----
-
-## After new wide parquet — Section 5: regional heatmaps
+## After new wide parquets — Section 5: regional heatmaps (SUPERSEDED — see above)
 
 Add a Section 5 to `eda_adrh.ipynb`:
-- Extract `prov_code` from first 2 chars of `cod_seccion` (no hardcoded lookup needed)
+- Extract `prov_code` from first 2 chars of `cod_seccion`
 - Map to CCAA using `prov_code → region` dict (same as in `eda_ineatlas.ipynb`)
-- Province-level heatmap: `renta_neta_media_por_hogar`, pension share, Gini (once 37677 processed)
+- Province-level heatmap: `renta_neta_media_por_hogar`, pension share, Gini
 - CCAA-level heatmap with annotations
-
-Note: aggregate only from high-coverage columns (>50% secciones). The 31097 renta columns
-cover only 4,480 secciones (large urban municipalities) — label clearly if shown.
+- Aggregate only from high-coverage columns (>50% secciones); label partial-coverage cols clearly
 
 ---
 
 ## Other pending items
 
-- **Fix `eda_ineatlas.ipynb` file path**: still loads from `data/census/census_2021_tract.csv`
-  (old path). Should be `data/input/ineatlas/census_2021_tract.csv`.
-
-- **`GENERATED_DATA.md`**: inventory of all generated parquet files — what each contains,
-  which script/notebook produced it, column list, row count.
-
-- **`select_dtypes("object")` Pandas 4 warning**: fix in any `optimise_dtypes()` calls
-  to use `include=["object", "string"]`.
-
 - **Folder reorganisation**: move raw input files to `data/input/{source}/` and generated
   files to `data/generated/{source}/` — pipeline scripts still reference old paths.
+
+- [x] **S3 upload of generated files**: all 9 parquets uploaded to `s3://hsf-group-ai-spain-hvac/` (account 268271485741) — see upload map in `GENERATED_DATA.md`
+
+- [x] **INE Census 2021 EDA (third data source)**: `eda_censo2021.ipynb` created and executed — 7 sections covering demographics, labour market & pensions, housing tenure, household composition, CCAA heatmap, and ADRH merge/correlations
+
+---
+
+## Completed
+
+- [x] Decoded all `t1_1`–`t22_5` INE C2021 indicator codes via `indicadores_seccen_c2021.xlsx`
+  — t15/t16 are NOT heating/AC (they are % otra inactividad / % estudiantes); t14_1 = % retirement pension (KEY HVAC signal); t20_1 = viviendas en propiedad (KEY for HVAC)
+  — Full mapping documented in `GENERATED_DATA.md`
+- [x] Fixed `censo2021_secciones.parquet`: rebuilt from IneAtlas CSV (36,333 × 41) with correct column names and values; old parquet had wrong INDICATOR_MAP (column values were shifted)
+- [x] Fixed `download_censo2021.py`: corrected `sep=";"` → `sep=","`, replaced entire INDICATOR_MAP with verified t-codes from xlsx, added `cod_seccion` construction from `cpro+cmun+dist+secc`
+
+- [x] Verified CSV vs JSON geographic granularity empirically (table 37677)
+  - CSV: 37,072 secciones; JSON: 37,071; one CSV-only: `1103205003` (Cádiz)
+  - CSV is full grid; JSON is sparse (omits unpublished observations)
+  - Updated `INE_ADRH_DATA_DOCUMENTATION.md` with verified findings
+- [x] Built `eda_adrh.ipynb` with S3 reader, cache, generated file inspection, HVAC distribution plots
+- [x] Built `adrh_secciones_2023_wide.parquet` (36,395 × 21, strict 2023, tables 30824/30825/30826/31097)
+  — will be superseded by `adrh_secciones_latest.parquet`
+- [x] Built `adrh_{secciones,distritos,municipios}_latest.parquet` (most-recent-available, all 6 tables, 29 indicators + vintage year cols)
+- [x] Added Section 6 to `eda_adrh.ipynb` — province heatmap (3 key indicators) + CCAA heatmap (8 HVAC-relevant indicators, annotated)
+- [x] Documented regional findings in `EDA_REGIONAL_FINDINGS.md` (heatmap analysis, Basque NaN root cause, Census 2021 PDF cross-validation)
+- [x] Fixed `eda_ineatlas.ipynb` file path: both cell 0 and cell 8 now use `data/input/ineatlas/census_2021_tract.csv`; cell 8 uses `DATA_PATH` variable
+- [x] Created `GENERATED_DATA.md` — full inventory of all generated parquet files
+- [x] `select_dtypes("object")` TODO: N/A — no such usage exists in project code; only `select_dtypes("float64")` is used
