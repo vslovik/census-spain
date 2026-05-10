@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "direct-marketing-japan"
+name = "census-spain"
 version = "0.1.0"
 description = ""
 authors = ["Slovikovskaya <vslovik@gmail.com>"]
