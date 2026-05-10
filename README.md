@@ -1,6 +1,6 @@
-# ai-spain-hvac
+# census-spain
 
-HVAC (and solar) propensity modelling for Homeserve Spain.
+Spain Census Data for HVAC (and solar) propensity modelling for Homeserve Spain.
 
 ## Setup
 
