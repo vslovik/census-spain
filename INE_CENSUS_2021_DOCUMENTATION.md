@@ -145,41 +145,203 @@ df["cod_seccion"] = df["cpro"].str.zfill(2) + df["cmun"].str.zfill(3) + df["dist
 
 ## File 2 — `CensoPersonas_2021.tab` (person microdata)
 
-Full **person-level microdata** for the 2021 census. Not used in the current pipeline — archived on S3 for potential future use (individual-level modelling, custom aggregations).
+**Person-level microdata** for the 2021 census — **one row per person**, covering ~4.7 million
+person records. This is the maximum detail available for public download from INE.
 
-**Origin:** extracted from `CensoPersonas_2021.zip` downloaded from `https://www.ine.es/censos2021/CensoPersonas_2021.zip` (April 2024). The ZIP contains 6 format variants; only the CSV/tab and metadata files are kept on S3 — R/SAS/SPSS/Stata formats were discarded.
+### Critical: this is a 10% public micro-sample
 
-| S3 file | Origin (inside zip) | Uncompressed | Notes |
-|---------|---------------------|-------------|-------|
-| `CensoPersonas_2021.tab.zst` | `CSV/CensoPersonas_2021.tab` | 1.3 GB | Primary data — one row per person |
-| `md_CensoPersonas_2021.txt.zst` | `md_CensoPersonas_2021.txt` | 1.0 GB | Machine-readable metadata |
-| `dr_CensoPersonas_2021.xlsx.zst` | `dr_CensoPersonas_2021.xlsx` | 60 KB | Variable dictionary |
-| `Leeme.txt.zst` | `Leeme.txt` | 2 KB | INE readme |
+INE does not publish 100% individual-level census microdata publicly. `CensoPersonas_2021.tab`
+is a **10% systematic random sample of households** — every person in the selected households
+is included (household composition is fully preserved), but only 1 in 10 households was selected.
 
-All files are zstd-compressed (level 15). SHA256 of the compressed file is stored in S3 object metadata (`sha256` key) and in `censo_personas_checksums.sha256` in the project root. Use `verify_ine_adrh_s3.sh` as a reference for the verification pattern.
+#### How Spain's 2021 census worked — two steps
 
-**Reading from S3:**
+**Step 1 — 100% enumeration via administrative registers**
+INE combined existing records (Padrón municipal, Social Security, tax registry, civil register)
+to count and characterise *every* person and dwelling in Spain. This produces
+`C2021_Indicadores.csv` — it covers all 47.4M residents and all 36,333 secciones censales
+with no sampling at all.
 
-```python
-import io, zstd, boto3, pandas as pd
+**Step 2 — 10% detailed questionnaire (random sample)**
+For richer individual-level variables (kinship, detailed education, employment situation,
+dwelling characteristics at person level), INE sent a longer questionnaire to 1 in 10
+households, **selected randomly and proportionally across all regions, provinces, municipalities,
+and city sizes**. Within each selected household, every person answered. This produces
+`CensoPersonas_2021.tab`.
 
-BUCKET = "hsf-group-ai-spain-hvac"
-s3 = boto3.client("s3")
+#### What "10% sample" does and does not mean
 
-obj = s3.get_object(Bucket=BUCKET, Key="ine-census-2021/raw/CensoPersonas_2021.tab.zst")
-raw = zstd.decompress(obj["Body"].read())
-df = pd.read_csv(io.BytesIO(raw), sep="\t", nrows=1000)   # sample first — 1.3 GB uncompressed
-```
+**It is NOT geographic** — it does not mean only some cities or regions were covered.
+Every region, every province, every city, and every village is represented. Madrid has
+sampled households. A village of 200 people in rural Extremadura has sampled households.
+The sampling is at household level, spread uniformly across the whole country.
 
-**Reading from local zip** (if S3 access is unavailable):
+**It IS a statistical sample** — you see roughly 1 in 10 households from each neighbourhood.
+This means the file is representative at national and regional level, adequate at
+municipality level, but less reliable for very small secciones censales (~70 sampled persons
+per sección on average — small secciones may have fewer).
 
-```python
-import zipfile, pandas as pd
+The closest analogy is the **US Census long-form / American Community Survey**: the short-form
+counts everyone (100%), while the long-form goes to a rotating sample of households for
+detailed socioeconomic variables. Spain's CensoPersonas follows the same logic.
 
-with zipfile.ZipFile("data/input/ine_census_2021/CensoPersonas_2021.zip") as z:
-    with z.open("CSV/CensoPersonas_2021.tab") as f:
-        df = pd.read_csv(f, sep="\t", nrows=1000)
-```
+| Dimension | Value |
+|---|---|
+| Persons in file | ~4.7 million (10% of 47.4M residents) |
+| Households in file | ~10% of all Spanish households, sampled uniformly across all areas |
+| Geographic coverage | All regions, provinces, municipalities — no area excluded |
+| Survey weight | **None** — INE treats the proportional random sample as self-weighting |
+| Full data available? | Not publicly — INE restricted access only (see §Full data access below) |
+
+This contrasts with the other two data sources in this project, neither of which is sampled:
+- `C2021_Indicadores.csv` / IneAtlas: **100% aggregate** — all 36,333 secciones censales, from Step 1 above
+- ADRH: **100% administrative records** — all ~37,034 secciones censales, annual tax/social security data
+
+### Variable structure (from `dr_CensoPersonas_2021.xlsx`)
+
+Each row contains three types of information simultaneously:
+
+**Geography + household linkage**
+
+| Variable | Description | Notes |
+|---|---|---|
+| `CPRO` | Province code (2 chars) | |
+| `CMUN` | Municipality code (3 chars) or size class for small municipalities | Privacy: small municipalities get a size-band code, not the real code |
+| `NVIV` | Dwelling/household identifier | Links all persons in the same household |
+| `NORDEN` | Person's order within the household | |
+
+**Individual person data**
+
+| Variable | Description | Key values |
+|---|---|---|
+| `VAREDAD` | Age | 0–100+ |
+| `SEXO` | Sex | |
+| `ECIVIL` | Civil status | Married/single/widowed/divorced |
+| `ESREAL_CNEDA` | Education level (detailed) | Socioeconomic proxy |
+| `RELA` | Main labour activity | `1`=employed, `2`=unemployed, `4`=disability pension, `5`=retirement pension ← key HVAC signal, `6`=other inactive, `7`=student |
+| `OCU63` | Occupation (2-digit CNO code) | |
+| `SITU` | Employment situation | Self-employed/permanent/temporary/other |
+| `VARANORES` | Year arrived at current dwelling | Stability signal — long-term residents invest in HVAC |
+
+**Dwelling data (attached to every person row)**
+
+| Variable | Description | Key values |
+|---|---|---|
+| `TIPO_EDIF_VIV` | Building type | `2`=individual house, `3`=2-dwelling building, `4`=apartment block (3+), `5`=non-residential building |
+| `TENEN_VIV` | Tenure | `2`=owner-occupied ← install prerequisite, `3`=rented, `4`=other (social/free), `9`=unknown |
+| `SUP_VIV` | Floor area (banded) | `02`=<30m², `03`=30–45, `04`=46–60, `05`=61–75, `06`=76–90, `07`=91–105, `08`=106–120, `09`=121–150, `10`=151–180, `11`=>180m² |
+| `ANO_CONS` | Construction year (detailed) | |
+| `NPLANTAS_SOBRE_EDIF` | Floors above ground | |
+
+**Kinship linkage** — unique to this dataset, not available in France RP2022
+
+| Variable | Description |
+|---|---|
+| `NORDEN_MAD` | Row order of parent 1 in this household (links to their row via `NVIV`+`NORDEN`) |
+| `NORDEN_PAD` | Row order of parent 2 |
+| `NORDEN_CON` | Row order of spouse/partner |
+| `NORDEN_OPA` | Row order of other relative |
+| `TIPOPER` | Role within family nucleus (head, spouse, child, other relative, non-relative) |
+| `FAMILIA` / `NUCLEO` | Family and nucleus identifiers within household |
+
+**Denormalized parent and spouse summaries** — INE pre-joins key attributes of relatives:
+
+| Variable group | Content |
+|---|---|
+| `VAREDAD_MAD`, `RELA_MAD`, `ESREAL_MAD_GR5`, `SITU_MAD` | Age, activity, education, employment of parent 1 |
+| `VAREDAD_PAD`, `RELA_PAD`, `ESREAL_PAD_GR5`, `SITU_PAD` | Same for parent 2 |
+| `VAREDAD_CON`, `RELA_CON`, `ESREAL_CON_GR5`, `SITU_CON` | Same for spouse/partner |
+
+**Household summary**
+
+| Variable | Description |
+|---|---|
+| `TAM_HOG` | Household size |
+| `ESTRUC_HOG` | Household structure |
+| `TIPO_HOG` | Household type |
+| `TIPO_NUC` | Nucleus type |
+| `NHIJOS_NUC` | Number of children in nucleus |
+
+### Why person-level opens new modelling possibilities
+
+Unlike the aggregate `C2021_Indicadores.csv` (which gives zone-level summaries), CensoPersonas
+allows **cross-person household analysis**. Key use cases for HVAC/solar propensity:
+
+- **Intergenerational purchase**: identify households where an elderly person (`RELA=5`, retired)
+  lives with a working-age family member (`RELA=1`, employed) — the younger member often drives
+  the HVAC/solar purchase decision on behalf of the household.
+- **Multi-generation households**: `TIPO_HOG` + `NHIJOS_NUC` reveal complex household structures
+  where purchasing power is pooled.
+- **Age gap within household**: link parent ages (`VAREDAD_MAD`, `VAREDAD_PAD`) to child ages
+  (`VAREDAD`) — a household where the head is 35 and parents are 65+ is a prime target.
+- **Tenure + age combination**: owner-occupied (`TENEN_VIV=2`) household where someone is
+  approaching retirement — a signal not recoverable from aggregate data alone.
+
+### Geographic grain limitation
+
+CensoPersonas exposes only province (`CPRO`) and municipality (`CMUN`). The sección censal
+code is **not present** in the individual microdata — INE suppresses it for privacy (same
+rationale as France's IRIS masking for small communes). This limits geographic joins:
+
+| Join | Possible? | Resulting grain |
+|---|---|---|
+| CensoPersonas × `adrh_secciones_latest.parquet` | No direct join | — |
+| CensoPersonas × `adrh_municipios_latest.parquet` | **Yes** — join on `CPRO+CMUN` → `cod_municipio` | Municipality |
+| CensoPersonas × `C2021_Indicadores.csv` | No — C2021 has sección grain not in CensoPersonas | — |
+| `C2021_Indicadores` × `adrh_secciones_latest` | **Yes** — join on `cod_seccion` | Sección censal |
+
+**Practical strategy:** attach municipality-level ADRH income features to each CensoPersonas
+row (using `adrh_municipios_latest.parquet`). This loses within-city income variation but is
+entirely adequate in rural areas and adds meaningful signal nationally.
+
+### S3 files
+
+**Origin:** extracted from `CensoPersonas_2021.zip` downloaded from
+`https://www.ine.es/censos2021/CensoPersonas_2021.zip` (April 2024).
+
+| S3 file | Uncompressed | Notes |
+|---------|-------------|-------|
+| `ine-census-2021/raw/CensoPersonas_2021.tab.zst` | 1.3 GB | Primary data — tab-delimited, one row per person |
+| `ine-census-2021/raw/md_CensoPersonas_2021.txt.zst` | 1.0 GB | Machine-readable metadata |
+| `ine-census-2021/raw/dr_CensoPersonas_2021.xlsx.zst` | 60 KB | Variable dictionary (codebook) |
+| `ine-census-2021/raw/Leeme.txt.zst` | 2 KB | INE readme |
+
+All files are zstd-compressed (level 15). SHA256 hashes in `censo_personas_checksums.sha256`.
+
+**Local download:** `data/input/ine_census_2021/CensoPersonas_2021.tab.zst` (downloaded from S3,
+129.5 MB compressed).
+
+**Stage-0 parquet:** see `0_censo_personas_to_parquet.ipynb` — filters to commercial population
+(`TENEN_VIV IN ('2','3')`), selects modelling-relevant columns, saves to
+`data/generated/ine_census_2021/censo_personas.parquet`.
+
+### Full Census 2021 data — access plan
+
+The 100% census microdata is not publicly available. INE provides restricted access through:
+
+**INE SREA (Servicio de Acceso Remoto a los Datos)**
+- Secure remote desktop environment on INE servers — data cannot be extracted, only results
+- Requires: institutional affiliation, formal research project proposal, data protection agreement
+- Intended for academic/public-interest research — **commercial propensity modelling likely does
+  not qualify without framing as a research study**
+- Application: `https://www.ine.es/dyngs/SDMX/es/oper.htm?c=ACCESO_INVESTIGADORES`
+- Timeline: 2–4 months for approval
+
+**Pragmatic assessment — is 10% sufficient?**
+
+For our use cases, the 10% sample is likely adequate:
+
+| Use case | Assessment |
+|---|---|
+| National-level propensity scoring | 4.7M records — fully robust |
+| Municipality-level aggregation | Adequate — large municipalities have thousands of sampled persons |
+| Sección censal aggregation | Marginal — ~70 sampled persons per sección on average; small secciones unreliable |
+| Household-graph modelling | Household composition is fully preserved (all persons in selected households included) |
+
+**Recommendation:** proceed with the 10% sample. Apply for SREA access as a long-term goal if
+the modelling team needs sección-level individual-level features. For the near term, combine
+CensoPersonas (person graph) with `adrh_municipios_latest.parquet` (income context) at
+municipality grain.
 
 ---
 
@@ -226,20 +388,57 @@ Lookup tables: numeric code → name for comunidades autónomas and provinces. U
 
 ---
 
+## Spain vs France census — fundamental data model difference
+
+The Spain and France census projects use **structurally different microdata formats**. This has
+direct consequences for what kinds of models are possible in each country.
+
+| Dimension | Spain — CensoPersonas 2021 | France — RP2022 logement |
+|---|---|---|
+| **Unit of observation** | Person (one row per person) | Dwelling (one row per dwelling) |
+| **Coverage** | 10% sample of households | Full rolling census (survey-weighted) |
+| **Records (public)** | ~4.7M person records | 17.1M dwelling records (after commercial filter) |
+| **Survey weight** | None (uniform 10% sample) | `IPONDL` (corrects for large-city undersampling) |
+| **Finest geographic grain** | Province + municipality | IRIS zone (9-char) or commune |
+| **Household linkage** | Yes — `NVIV` links persons | No — each dwelling is independent |
+| **Kinship structure** | Yes — parent/spouse rows linked | No |
+| **Parent/spouse attributes** | Yes — denormalized into each row | No |
+| **Heating fuel** | **No** — not collected | Yes — `CMBL` (gas/oil/electric/other) |
+| **Reference date** | 1 November 2021 (fixed) | 1 January 2022 (rolling 5-year) |
+| **Next edition** | 2031 (decennial) | RP2023 expected autumn 2026 |
+
+**What Spain can do that France cannot:**
+- Model intergenerational purchase patterns (young family member buys for elderly parent)
+- Cross-person features within a household (age gap, employment mix)
+- Detect multi-family households where HVAC decisions involve multiple adults
+
+**What France can do that Spain cannot:**
+- Heating fuel segmentation at dwelling level (oil vs gas vs electric — the strongest HVAC signal)
+- IRIS-level geographic precision (finer than Spanish municipality)
+- Full population coverage with survey weights
+
 ## How this source relates to the other two
 
 ```
-INE Census 2021 (this file)
-    └─ C2021_Indicadores.csv   (raw t-code columns)
-          │
-          └─ pablogguz reprocesses → census_2021_tract.csv
-                (English column names, proportions, all 36,333 tracts)
-                → documented in INEATLAS_DOCUMENTATION.md
+Three Spain data sources — coverage comparison:
 
-INE Census 2021 (this file)
-    └─ join with ADRH on cod_seccion
-          → ADRH covers income; Census covers housing and demographics
-          → see DATA_SOURCES.md for the full 3-source picture
+CensoPersonas_2021.tab   → 10% sample, person-level, ~4.7M rows
+                                   ↓
+                         municipality grain only (CPRO+CMUN)
+                                   ↓
+                    join to adrh_municipios_latest.parquet
+                    (income context, municipality level)
+
+C2021_Indicadores.csv    → 100% aggregate, 36,333 secciones
+  │                               ↓
+  └─ pablogguz/IneAtlas   English-named version (census_2021_tract.csv)
+                                   ↓
+                         join on cod_seccion to ADRH secciones
+                         → full sección-level enrichment
+
+ADRH (tax records)       → 100% admin records, 37,034 secciones
+                         → income, inequality, income sources
+                         → documented in INE_ADRH_DATA_DOCUMENTATION.md
 ```
 
 ---

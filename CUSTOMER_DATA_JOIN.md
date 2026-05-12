@@ -46,11 +46,11 @@ A sección censal typically contains 1,000–2,500 inhabitants. At this resoluti
 ```
 Customer address
       │
-      ▼  (Nominatim / Google Maps Geocoding API)
-  lat / lon coordinates
+      ▼  (Cartociudad — Spain's official geocoder, IGN)
+  lat / lon  +  municipio code
       │
-      ▼  (GeoPandas spatial join)
-  INE sección censal shapefile  →  cod_seccion (10 chars)
+      ▼  (GeoPandas spatial join on INE sección censal shapefile)
+  cod_seccion (10 chars)
       │
       ├──▶  censo2021_secciones.parquet        (demographics, housing, pensions)
       └──▶  adrh_secciones_latest.parquet      (income, inequality, income sources)
@@ -58,8 +58,56 @@ Customer address
 
 **Result:** ~70 features per customer at sección censal resolution.
 
+**Recommended geocoder — Cartociudad (IGN)**
+
+Cartociudad is Spain's official national geocoder, maintained by the Instituto Geográfico
+Nacional (IGN) — the Spanish equivalent of France's BAN (Base Adresse Nationale). It is
+free, requires no API key, and is the authoritative source for Spanish address geocoding.
+
+| | Spain — Cartociudad | France — BAN |
+|---|---|---|
+| Operator | IGN (Instituto Geográfico Nacional) | IGN France + La Poste |
+| API endpoint | `https://www.cartociudad.es/geocoder/api/geocoder/findJsonp` | `https://api-adresse.data.gouv.fr/csv/` |
+| Returns | lat/lon + municipio code | lat/lon + commune code (and IRIS directly for some cases) |
+| Sección censal | Not returned — spatial join always required | N/A (IRIS via spatial join) |
+| Batch support | Via iterative calls or QGIS plugin | Native `/csv/` bulk endpoint (up to 50k rows) |
+| Cost | Free, no key | Free, no key |
+
+**Key difference from BAN:** France's BAN bulk endpoint natively returns the IRIS/commune
+code, reducing the need for a spatial join in many cases. Cartociudad always returns only
+lat/lon and municipio — the spatial join against the INE sección shapefile is always required
+to reach sección censal resolution.
+
+**Cartociudad usage (single address):**
+```python
+import requests
+
+def cartociudad_geocode(address: str, municipio: str = "", provincia: str = ""):
+    params = {
+        "q": f"{address}, {municipio}, {provincia}",
+        "limit": 1,
+        "no_process": False,
+    }
+    resp = requests.get(
+        "https://www.cartociudad.es/geocoder/api/geocoder/findJsonp",
+        params=params, timeout=10,
+    )
+    # Response is JSONP — strip callback wrapper
+    text = resp.text.strip()
+    if text.startswith("callback("):
+        text = text[9:-1]
+    import json
+    result = json.loads(text)
+    if result and "lat" in result:
+        return result["lat"], result["lng"], result.get("municipality", ""), result.get("id", "")
+    return None, None, None, None
+```
+
+Fallback geocoders: `geopy` Nominatim (free, lower accuracy for Spanish addresses) or
+Google Maps Geocoding API (paid, highest accuracy, requires key).
+
 **Tools needed:**
-- Geocoding: `geopy` (Nominatim, free) or Google Maps Geocoding API (paid, higher accuracy)
+- Geocoding: Cartociudad (recommended), Nominatim, or Google Maps Geocoding API
 - Spatial join: `geopandas` + INE sección shapefile (see below)
 - Join key: `CUSEC` in shapefile = `cod_seccion` in parquets (both 10 chars, zero-padded)
 
@@ -100,15 +148,27 @@ The shapefile defining the geographic boundaries of all ~36,000 secciones censal
 ```python
 import geopandas as gpd
 import pandas as pd
-from geopy.geocoders import Nominatim
+import requests, json
 
-# 1. Geocode customer addresses
-geocoder = Nominatim(user_agent="homeserve-hvac")
-def geocode(address: str):
-    loc = geocoder.geocode(address, country_codes="es", timeout=10)
-    return (loc.latitude, loc.longitude) if loc else (None, None)
+# 1. Geocode customer addresses via Cartociudad (Spain's official IGN geocoder)
+def cartociudad_geocode(address: str) -> tuple:
+    try:
+        resp = requests.get(
+            "https://www.cartociudad.es/geocoder/api/geocoder/findJsonp",
+            params={"q": address, "limit": 1},
+            timeout=10,
+        )
+        text = resp.text.strip()
+        if text.startswith("callback("):
+            text = text[9:-1]
+        result = json.loads(text)
+        if result and "lat" in result:
+            return result["lat"], result["lng"]
+    except Exception:
+        pass
+    return None, None
 
-customers["lat"], customers["lon"] = zip(*customers["full_address"].map(geocode))
+customers["lat"], customers["lon"] = zip(*customers["full_address"].map(cartociudad_geocode))
 
 # 2. Load INE sección shapefile
 secciones = gpd.read_file("data/input/ine_census_2021/secciones_censales_2021.shp")

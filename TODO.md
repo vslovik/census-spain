@@ -4,6 +4,18 @@
 
 ## Pending
 
+- **CensoPersonas pre-aggregation parquet** ← *next up*: Run `0_censo_personas_to_parquet.ipynb`.
+  File already downloaded locally (`data/input/ine_census_2021/CensoPersonas_2021.tab.zst`, 129.5 MB).
+  Commercial filter confirmed from codebook: `TENEN_VIV IN ('2', '3')` (owner-occupied + private
+  rented; excludes social/other housing). Column selection: keep geography+linkage (CPRO, CMUN,
+  NVIV, NORDEN), person demographics (VAREDAD, SEXO, ECIVIL, ESREAL_CNEDA, RELA, OCU63, SITU,
+  VARANORES), dwelling (TIPO_EDIF_VIV, SUP_VIV, TENEN_VIV, NPLANTAS_SOBRE_EDIF, ANO_CONS),
+  kinship linkage (NORDEN_MAD, NORDEN_PAD, NORDEN_CON, NORDEN_OPA, FAMILIA, NUCLEO, TIPOPER),
+  parent/spouse summaries (VAREDAD_MAD/PAD/CON, RELA_MAD/PAD/CON, ESREAL_MAD/PAD/CON_GR5,
+  SITU_MAD/PAD/CON), household (TAM_HOG, ESTRUC_HOG, TIPO_HOG), nucleus (TIPO_NUC, TAM_NUC,
+  NHIJOS_NUC). Drop all `_MI` imputation flag columns and mobility/migration columns.
+  Update Cell 4 in the notebook with this filter and column list, then run.
+
 - **INE Census 2021 shapefile**: needed for customer address → `cod_seccion` spatial join. Not yet in S3 (`ine-census-2021/dictionaries/` only has xlsx/xls code tables). Download from INE cartography portal and upload. Required before building the geocoding pipeline (`CUSTOMER_DATA_JOIN.md`).
 
 - **Customer address data**: send `letter_to_sales.md` to sales/CRM team. Address data is the prerequisite for the customer enrichment pipeline.

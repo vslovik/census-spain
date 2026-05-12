@@ -1,6 +1,6 @@
 # Generated Data Inventory
 
-All files in `data/generated/`. Last updated: 2026-05-04.
+All files in `data/generated/`. Last updated: 2026-05-12.
 
 S3 bucket: `s3://hsf-group-ai-spain-hvac/` (account 268271485741, profile `AWSAdministratorAccess-268271485741`, region `eu-west-2`)
 
@@ -17,6 +17,7 @@ S3 bucket: `s3://hsf-group-ai-spain-hvac/` (account 268271485741, profile `AWSAd
 | `data/generated/adrh/30825_secciones.parquet` | `s3://hsf-group-ai-spain-hvac/ine-adrh/generated/30825_secciones.parquet` |
 | `data/generated/adrh/30826_secciones.parquet` | `s3://hsf-group-ai-spain-hvac/ine-adrh/generated/30826_secciones.parquet` |
 | `data/generated/ineatlas/censo2021_secciones.parquet` | `s3://hsf-group-ai-spain-hvac/ineatlas/generated/censo2021_secciones.parquet` |
+| `data/generated/ine_census_2021/censo_personas.parquet` | `s3://hsf-group-ai-spain-hvac/ine-census-2021/generated/censo_personas.parquet` |
 
 ---
 
@@ -192,6 +193,39 @@ Full INE C2021 t-code mapping (verified against `data/input/ine_census_2021/indi
 | `t22_3` | Hogares de 3 personas | |
 | `t22_4` | Hogares de 4 personas | |
 | `t22_5` | Hogares de 5 o más personas | |
+
+---
+
+## CensoPersonas 2021 (`data/generated/ine_census_2021/`)
+
+### `censo_personas.parquet` ← primary person-level microdata file
+**Producer:** `0_censo_personas_to_parquet.ipynb`  
+**Source:** `CensoPersonas_2021.tab.zst` — INE Census 2021 person microdata (10% random sample)  
+**Shape:** 4,348,375 rows × 45 columns  **Size:** 59 MB  
+**Format:** one row per person; all columns stored as strings (all_varchar=true at read time)  
+**Key:** `CPRO` + `CMUN` (province + municipality) — finest grain available in individual microdata  
+**Filter applied:** `TENEN_VIV IN ('2', '3')` — owner-occupied and private rented only; social/free housing excluded
+
+Column groups:
+
+| Group | Columns | Purpose |
+|---|---|---|
+| Geography + linkage | `CPRO`, `CMUN`, `NVIV`, `NORDEN` | Geographic join + within-household person linkage |
+| Person demographics | `ANAC`, `VAREDAD`, `SEXO`, `ECIVIL`, `ESREAL_CNEDA`, `RELA`, `OCU63`, `ACT89`, `SITU`, `VARANORES` | Age, sex, education, employment, stability |
+| Dwelling | `TIPO_EDIF_VIV`, `SUP_VIV`, `TENEN_VIV`, `NPLANTAS_SOBRE_EDIF`, `ANO_CONS` | Building type, area, tenure, construction year |
+| Kinship linkage | `NORDEN_PAD`, `NORDEN_MAD`, `NORDEN_CON`, `NORDEN_OPA`, `FAMILIA`, `NUCLEO`, `TIPOPER` | Links to parent/spouse rows; enables intergenerational modelling |
+| Parent 1 summary | `VAREDAD_MAD`, `ESREAL_MAD_GR5`, `RELA_MAD`, `SITU_MAD` | Age, education, activity, employment of parent 1 |
+| Parent 2 summary | `VAREDAD_PAD`, `ESREAL_PAD_GR5`, `RELA_PAD`, `SITU_PAD` | Same for parent 2 |
+| Spouse summary | `VAREDAD_CON`, `ESREAL_CON_GR5`, `RELA_CON`, `SITU_CON` | Same for spouse/partner |
+| Household | `TAM_HOG`, `ESTRUC_HOG`, `TIPO_HOG` | Household size and structure |
+| Nucleus | `TIPO_NUC`, `TAM_NUC`, `NHIJOS_NUC`, `TIPO_PAR_NUC1` | Family nucleus type and size |
+
+**Dropped columns:** all `_MI` imputation flag columns (~24), mobility/migration history columns (~18),
+nationality/birthplace detail columns (~8), workplace/study location columns (~6), and columns
+derivable from others (`SUP_OCU_VIV`, `NPLANTAS_BAJO_EDIF`, `FAM_HOG`, `NUC_HOG`, `TIPO_PAR_NUC2`).
+
+**Join to ADRH:** municipality level only — sección censal code not present in individual microdata.
+Use `adrh_municipios_latest.parquet` keyed on `CPRO.zfill(2) + CMUN.zfill(3)` = `cod_municipio`.
 
 ---
 
